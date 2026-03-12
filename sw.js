@@ -1,11 +1,11 @@
-const CACHE_NAME = 'bball-stats-v1';
+const CACHE_NAME = 'bball-stats-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './game.html',
   './styles.css',
+  './index.js',
   './app.js',
-  './settings.html',
-  './settings.js',
   './manifest.json'
 ];
 
