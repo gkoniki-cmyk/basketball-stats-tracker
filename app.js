@@ -17,8 +17,8 @@ const state = {
         otPeriod: 0 // tracks OT number
     },
     teams: {
-        A: { name: "Team A", score: 0, timeouts: 1, players: [] }, // Adjusted timeouts for minibasketball config logic
-        B: { name: "Team B", score: 0, timeouts: 1, players: [] }
+        A: { name: "Team A", score: 0, timeouts: 1, players: [], quarterFouls: 0 },
+        B: { name: "Team B", score: 0, timeouts: 1, players: [], quarterFouls: 0 }
     },
     selectedPlayerId: null,
     selectedShotType: null,
@@ -72,11 +72,17 @@ function getTeamKeyFromPlayerId(id) {
 // ---// DOM Elements
 const els = {
     timerDisplay: document.getElementById('timer-display'),
-    btnTimerMinus: document.getElementById('btn-timer-minus'),
-    btnTimerPlus: document.getElementById('btn-timer-plus'),
+    btnTimerMinusMin: document.getElementById('btn-timer-minus-min'),
+    btnTimerMinus10Sec: document.getElementById('btn-timer-minus-10sec'),
+    btnTimerMinusSec: document.getElementById('btn-timer-minus-sec'),
+    btnTimerPlusSec: document.getElementById('btn-timer-plus-sec'),
+    btnTimerPlus10Sec: document.getElementById('btn-timer-plus-10sec'),
+    btnTimerPlusMin: document.getElementById('btn-timer-plus-min'),
     currentQuarter: document.getElementById('current-quarter'),
     scoreA: document.getElementById('score-a'),
     scoreB: document.getElementById('score-b'),
+    teamFoulA: document.getElementById('team-foul-a'),
+    teamFoulB: document.getElementById('team-foul-b'),
     timeoutA: document.getElementById('timeout-count-a'),
     timeoutB: document.getElementById('timeout-count-b'),
     btnTimeoutA: document.getElementById('btn-timeout-a'),
@@ -90,7 +96,11 @@ const els = {
     btnCancelAction: document.getElementById('btn-cancel-action'),
     btnExportCsv: document.getElementById('btn-export-csv'),
     btnSettings: document.getElementById('btn-settings'),
-    btnEndMatch: document.getElementById('btn-end-match')
+    btnEndMatch: document.getElementById('btn-end-match'),
+    quarterModal: document.getElementById('quarter-sub-modal'),
+    quarterListA: document.getElementById('quarter-list-a'),
+    quarterListB: document.getElementById('quarter-list-b'),
+    btnConfirmQuarter: document.getElementById('btn-confirm-quarter')
 };
 
 // --- INITIALIZATION ---
@@ -103,6 +113,10 @@ function init() {
     updateTimerDisplay();
     renderPlayLog(); // Initial render of play log
     setupEventListeners();
+
+    if (state.playLog.length === 0) {
+        openQuarterModal(true);
+    }
 }
 
 function loadSettingsData() {
@@ -166,6 +180,7 @@ function loadGameState() {
             if (parsedState.teams && parsedState.teams[teamKey]) {
                 state.teams[teamKey].score = parsedState.teams[teamKey].score;
                 state.teams[teamKey].timeouts = parsedState.teams[teamKey].timeouts;
+                state.teams[teamKey].quarterFouls = parsedState.teams[teamKey].quarterFouls || 0;
                 
                 // Merge player states (stats and court status) based on matching IDs
                 // If a player ID exists in the game state, we take their stats.
@@ -201,11 +216,13 @@ function saveGameState() {
             A: {
                 score: state.teams.A.score,
                 timeouts: state.teams.A.timeouts,
+                quarterFouls: state.teams.A.quarterFouls,
                 players: state.teams.A.players.map(p => ({ id: p.id, stats: p.stats, isOnCourt: p.isOnCourt }))
             },
             B: {
                 score: state.teams.B.score,
                 timeouts: state.teams.B.timeouts,
+                quarterFouls: state.teams.B.quarterFouls,
                 players: state.teams.B.players.map(p => ({ id: p.id, stats: p.stats, isOnCourt: p.isOnCourt }))
             }
         },
@@ -229,7 +246,12 @@ function renderPlayers(teamKey) {
     
     players.forEach(player => {
         const btn = document.createElement('button');
-        btn.className = `player-btn ${state.selectedPlayerId === player.id ? 'active' : ''}`;
+        let classes = ['player-btn'];
+        if (state.selectedPlayerId === player.id) classes.push('active');
+        if (player.stats.PF >= 5) classes.push('foul-danger');
+        else if (player.stats.PF === 4) classes.push('foul-warning');
+        
+        btn.className = classes.join(' ');
         btn.dataset.playerId = player.id;
         
         btn.innerHTML = `
@@ -249,6 +271,16 @@ function updateScoreBoard() {
     els.scoreB.textContent = state.teams.B.score;
     els.timeoutA.textContent = state.teams.A.timeouts;
     els.timeoutB.textContent = state.teams.B.timeouts;
+    
+    // Team Fouls Update
+    ['A', 'B'].forEach(key => {
+        const fouls = state.teams[key].quarterFouls;
+        const el = (key === 'A') ? els.teamFoulA : els.teamFoulB;
+        if (el) {
+            el.textContent = `チームファウル: ${fouls}/5回`;
+            el.className = 'team-foul ' + (fouls >= 5 ? 'foul-danger' : (fouls === 4 ? 'foul-warning' : ''));
+        }
+    });
     
     // Display Q or OT
     if (state.timer.otPeriod > 0) {
@@ -392,20 +424,24 @@ function tickTimer() {
     updateTimerDisplay();
 }
 
-function adjustTimer(change) {
+function adjustTimer(secondsChange) {
     // Only adjust when paused
     if (state.timer.isRunning) return;
     
-    // Simplistic adjustment: 1 minute blocks
-    state.timer.minutes += change;
+    let totalSeconds = state.timer.minutes * 60 + state.timer.seconds;
+    totalSeconds += secondsChange;
     
-    if (state.timer.minutes < 0) {
-        state.timer.minutes = 0;
-        state.timer.seconds = 0;
+    if (totalSeconds < 0) {
+        totalSeconds = 0;
     }
-    if (state.timer.minutes > state.gameSettings.quarterLength) { // Prevent going higher than Q settings if manual 
-        state.timer.minutes = state.gameSettings.quarterLength;
+    
+    const maxSeconds = state.gameSettings.quarterLength * 60;
+    if (totalSeconds > maxSeconds) { 
+        totalSeconds = maxSeconds;
     }
+    
+    state.timer.minutes = Math.floor(totalSeconds / 60);
+    state.timer.seconds = totalSeconds % 60;
     
     updateTimerDisplay();
     saveGameState();
@@ -418,6 +454,8 @@ function resetTimeForQuarter() {
     // Per minibasketball (or FIBA logic often mapped locally), 1 timeout per quarter.
     state.teams.A.timeouts = 1;
     state.teams.B.timeouts = 1;
+    state.teams.A.quarterFouls = 0;
+    state.teams.B.quarterFouls = 0;
     saveGameState();
 }
 
@@ -425,8 +463,8 @@ function resetTimeForQuarter() {
 
 let subModalState = {
     teamKey: null,
-    selectedOutId: null,
-    selectedInId: null
+    selectedOutIds: [],
+    selectedInIds: []
 };
 
 function openSubModal(teamKey) {
@@ -436,8 +474,8 @@ function openSubModal(teamKey) {
     }
 
     subModalState.teamKey = teamKey;
-    subModalState.selectedOutId = null;
-    subModalState.selectedInId = null;
+    subModalState.selectedOutIds = [];
+    subModalState.selectedInIds = [];
 
     document.getElementById('sub-modal-title').textContent = `メンバーチェンジ (チーム${teamKey})`;
     renderSubModalLists();
@@ -458,19 +496,32 @@ function renderSubModalLists() {
 
     players.forEach(p => {
         const btn = document.createElement('button');
-        btn.innerHTML = `<span style="font-weight:bold; width:30px; display:inline-block">#${p.number}</span> ${p.name || ''}`;
+        const foulText = p.stats.PF > 0 ? ` (${p.stats.PF}f)` : '';
+        btn.innerHTML = `<span style="font-weight:bold; width:30px; display:inline-block">#${p.number}</span> ${p.name || ''}${foulText}`;
+        
+        let classes = ['btn', 'sub-btn'];
+        if (p.stats.PF >= 5) classes.push('foul-danger');
+        else if (p.stats.PF === 4) classes.push('foul-warning');
         
         if (p.isOnCourt) {
-            btn.className = `btn sub-btn ${subModalState.selectedOutId === p.id ? 'selected' : 'btn-outline'}`;
+            if (subModalState.selectedOutIds.includes(p.id)) classes.push('selected');
+            else classes.push('btn-outline');
+            btn.className = classes.join(' ');
             btn.onclick = () => {
-                subModalState.selectedOutId = subModalState.selectedOutId === p.id ? null : p.id;
+                const idx = subModalState.selectedOutIds.indexOf(p.id);
+                if (idx > -1) subModalState.selectedOutIds.splice(idx, 1);
+                else subModalState.selectedOutIds.push(p.id);
                 renderSubModalLists();
             };
             listCourt.appendChild(btn);
         } else {
-            btn.className = `btn sub-btn ${subModalState.selectedInId === p.id ? 'selected' : 'btn-outline'}`;
+            if (subModalState.selectedInIds.includes(p.id)) classes.push('selected');
+            else classes.push('btn-outline');
+            btn.className = classes.join(' ');
             btn.onclick = () => {
-                subModalState.selectedInId = subModalState.selectedInId === p.id ? null : p.id;
+                const idx = subModalState.selectedInIds.indexOf(p.id);
+                if (idx > -1) subModalState.selectedInIds.splice(idx, 1);
+                else subModalState.selectedInIds.push(p.id);
                 renderSubModalLists();
             };
             listBench.appendChild(btn);
@@ -478,7 +529,7 @@ function renderSubModalLists() {
     });
 
     const btnConfirm = document.getElementById('btn-confirm-sub');
-    if (subModalState.selectedOutId && subModalState.selectedInId) {
+    if (subModalState.selectedOutIds.length > 0 && subModalState.selectedOutIds.length === subModalState.selectedInIds.length) {
         btnConfirm.disabled = false;
         btnConfirm.onclick = confirmSubstitution;
     } else {
@@ -488,55 +539,218 @@ function renderSubModalLists() {
 }
 
 function confirmSubstitution() {
-    const pOut = getPlayerById(subModalState.selectedOutId);
-    const pIn = getPlayerById(subModalState.selectedInId);
+    const outs = subModalState.selectedOutIds.map(getPlayerById);
+    const ins = subModalState.selectedInIds.map(getPlayerById);
 
-    if (pOut && pIn) {
-        pOut.isOnCourt = false;
-        pIn.isOnCourt = true;
+    if (outs.length > 0 && outs.length === ins.length) {
+        outs.forEach(p => p.isOnCourt = false);
+        ins.forEach(p => p.isOnCourt = true);
         
         // Deselect if active in main UI
-        if (state.selectedPlayerId === pOut.id) {
+        if (state.selectedPlayerId && subModalState.selectedOutIds.includes(state.selectedPlayerId)) {
             state.selectedPlayerId = null;
             state.selectedShotType = null;
             renderShotSelection();
         }
 
-        // Log Substitution Events
-        // 1. Log Out
-        state.playLog.push({
-            timestamp: new Date().toISOString(),
-            quarter: state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : state.timer.quarter,
-            time: els.timerDisplay.textContent,
-            teamKey: subModalState.teamKey,
-            playerId: pOut.id,
-            playerNumber: pOut.number,
-            playerName: pOut.name,
-            actionType: 'sub_out',
-            description: `${pOut.number}番 ${pOut.name || ''} 退場`,
-            previousState: { playerStats: { ...pOut.stats }, teamScore: state.teams[subModalState.teamKey].score, isOnCourt: true }
+        const teamScore = state.teams[subModalState.teamKey].score;
+        const qtrLabel = state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : state.timer.quarter;
+
+        outs.forEach((pOut, idx) => {
+            const pIn = ins[idx];
+
+            // 1. Log Out
+            state.playLog.push({
+                timestamp: new Date().toISOString(),
+                quarter: qtrLabel,
+                time: els.timerDisplay.textContent,
+                teamKey: subModalState.teamKey,
+                playerId: pOut.id,
+                playerNumber: pOut.number,
+                playerName: pOut.name,
+                actionType: 'sub_out',
+                description: `${pOut.number}番 ${pOut.name || ''} 退場`,
+                previousState: { playerStats: { ...pOut.stats }, teamScore: teamScore, isOnCourt: true }
+            });
+
+            // 2. Log In
+            state.playLog.push({
+                timestamp: new Date().toISOString(),
+                quarter: qtrLabel,
+                time: els.timerDisplay.textContent,
+                teamKey: subModalState.teamKey,
+                playerId: pIn.id,
+                playerNumber: pIn.number,
+                playerName: pIn.name,
+                actionType: 'sub_in',
+                description: `${pIn.number}番 ${pIn.name || ''} 出場`,
+                previousState: { playerStats: { ...pIn.stats }, teamScore: teamScore, isOnCourt: false }
+            });
+            updateRecentPlay(`交代: #${pOut.number} OUT, #${pIn.number} IN`);
         });
 
-        // 2. Log In
-        state.playLog.push({
-            timestamp: new Date().toISOString(),
-            quarter: state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : state.timer.quarter,
-            time: els.timerDisplay.textContent,
-            teamKey: subModalState.teamKey,
-            playerId: pIn.id,
-            playerNumber: pIn.number,
-            playerName: pIn.name,
-            actionType: 'sub_in',
-            description: `${pIn.number}番 ${pIn.name || ''} 出場`,
-            previousState: { playerStats: { ...pIn.stats }, teamScore: state.teams[subModalState.teamKey].score, isOnCourt: false }
-        });
-
-        updateRecentPlay(`交代: #${pOut.number} OUT, #${pIn.number} IN`);
         renderPlayers('A');
         renderPlayers('B');
         saveGameState();
     }
     closeSubModal();
+}
+
+// --- QUARTER MODAL LOGIC ---
+
+let quarterModalState = {
+    selectedIdsA: [],
+    selectedIdsB: []
+};
+
+function openQuarterModal(isGameStart = false) {
+    if (state.timer.isRunning) {
+        alert("時計が動いている最中は操作できません。タイマーを止めてください。");
+        return;
+    }
+
+    if (isGameStart) {
+        quarterModalState.selectedIdsA = state.teams.A.players.slice(0, 5).map(p => p.id);
+        quarterModalState.selectedIdsB = state.teams.B.players.slice(0, 5).map(p => p.id);
+        document.getElementById('quarter-modal-title').textContent = "スターティングメンバーを選択 (各5名)";
+    } else {
+        // pre-select current players on court
+        quarterModalState.selectedIdsA = state.teams.A.players.filter(p => p.isOnCourt).map(p => p.id);
+        quarterModalState.selectedIdsB = state.teams.B.players.filter(p => p.isOnCourt).map(p => p.id);
+        document.getElementById('quarter-modal-title').textContent = "次のクォーターの出場メンバーを選択 (各5名)";
+    }
+
+    els.btnConfirmQuarter.dataset.isGameStart = isGameStart;
+
+    renderQuarterModalLists();
+    els.quarterModal.style.display = 'flex';
+}
+
+function closeQuarterModal() {
+    els.quarterModal.style.display = 'none';
+}
+
+function renderQuarterModalLists() {
+    els.quarterListA.innerHTML = '';
+    els.quarterListB.innerHTML = '';
+
+    ['A', 'B'].forEach(teamKey => {
+        const listEl = teamKey === 'A' ? els.quarterListA : els.quarterListB;
+        const selectedIds = teamKey === 'A' ? quarterModalState.selectedIdsA : quarterModalState.selectedIdsB;
+        
+        state.teams[teamKey].players.forEach(p => {
+            const btn = document.createElement('button');
+            const foulText = p.stats.PF > 0 ? ` (${p.stats.PF}f)` : '';
+            btn.innerHTML = `<span style="font-weight:bold; width:30px; display:inline-block">#${p.number}</span> ${p.name || ''}${foulText}`;
+            
+            let classes = ['btn', 'sub-btn'];
+            if (p.stats.PF >= 5) classes.push('foul-danger');
+            else if (p.stats.PF === 4) classes.push('foul-warning');
+            
+            if (selectedIds.includes(p.id)) {
+                classes.push('selected');
+            } else {
+                classes.push('btn-outline');
+            }
+            btn.className = classes.join(' ');
+            
+            btn.onclick = () => {
+                const idx = selectedIds.indexOf(p.id);
+                if (idx > -1) {
+                    selectedIds.splice(idx, 1);
+                } else {
+                    selectedIds.push(p.id);
+                }
+                renderQuarterModalLists();
+            };
+            
+            listEl.appendChild(btn);
+        });
+    });
+
+    if (quarterModalState.selectedIdsA.length === 5 && quarterModalState.selectedIdsB.length === 5) {
+        els.btnConfirmQuarter.disabled = false;
+        const isGameStart = els.btnConfirmQuarter.dataset.isGameStart === 'true';
+        els.btnConfirmQuarter.textContent = isGameStart ? "試合を開始する" : "クォーターを開始する";
+        els.btnConfirmQuarter.onclick = isGameStart ? startGameFromModal : startNextQuarter;
+    } else {
+        els.btnConfirmQuarter.disabled = true;
+        els.btnConfirmQuarter.textContent = `A:${quarterModalState.selectedIdsA.length}名 / B:${quarterModalState.selectedIdsB.length}名 (各5名必須)`;
+        els.btnConfirmQuarter.onclick = null;
+    }
+}
+
+function startGameFromModal() {
+    closeQuarterModal();
+
+    // Apply courts
+    state.teams.A.players.forEach(p => p.isOnCourt = quarterModalState.selectedIdsA.includes(p.id));
+    state.teams.B.players.forEach(p => p.isOnCourt = quarterModalState.selectedIdsB.includes(p.id));
+
+    state.selectedPlayerId = null;
+    state.selectedShotType = null;
+    renderShotSelection();
+
+    // Log Game Start
+    state.playLog.push({
+        timestamp: new Date().toISOString(),
+        quarter: "1Q",
+        time: els.timerDisplay.textContent,
+        teamKey: 'TEAM',
+        playerId: 'TEAM',
+        playerNumber: '-',
+        playerName: '-',
+        actionType: 'game_start',
+        description: `1Q 開始 (スタメン選出)`,
+        previousState: { teamScore: 0, timeouts: 0, isOnCourt: false }
+    });
+
+    renderPlayers('A');
+    renderPlayers('B');
+    renderPlayLog();
+    saveGameState();
+}
+
+function startNextQuarter() {
+    closeQuarterModal();
+
+    if (state.timer.quarter < 4 && state.timer.otPeriod === 0) {
+        state.timer.quarter++;
+    } else {
+        state.timer.quarter = 4;
+        state.timer.otPeriod++;
+    }
+
+    // Apply courts
+    state.teams.A.players.forEach(p => p.isOnCourt = quarterModalState.selectedIdsA.includes(p.id));
+    state.teams.B.players.forEach(p => p.isOnCourt = quarterModalState.selectedIdsB.includes(p.id));
+
+    state.selectedPlayerId = null;
+    state.selectedShotType = null;
+    renderShotSelection();
+
+    // Log Quarter Start
+    const qtrName = state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : `${state.timer.quarter}Q`;
+    state.playLog.push({
+        timestamp: new Date().toISOString(),
+        quarter: state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : state.timer.quarter, // Logic matches others
+        time: "00:00",
+        teamKey: 'TEAM',
+        playerId: 'TEAM',
+        playerNumber: '-',
+        playerName: '-',
+        actionType: 'quarter_start',
+        description: `${qtrName} 開始 (メンバー更新)`,
+        previousState: { teamScore: 0, timeouts: 0, isOnCourt: false }
+    });
+
+    resetTimeForQuarter();
+    updateTimerDisplay();
+    updateScoreBoard();
+    renderPlayers('A');
+    renderPlayers('B');
+    renderPlayLog();
+    saveGameState();
 }
 
 // --- EVENT HANDLERS ---
@@ -644,10 +858,12 @@ function handleAction(actionType) {
     // We clone the current stats to save in playLog for easy Undo
     const previousStats = { ...player.stats };
     const previousScore = state.teams[teamKey].score;
+    const previousTeamFouls = state.teams[teamKey].quarterFouls;
 
     switch(actionType) {
         case 'foul':
             player.stats.PF += 1;
+            state.teams[teamKey].quarterFouls += 1;
             actionDescription = `${player.number}番 ファウル`;
             break;
         case 'oreb':
@@ -704,6 +920,11 @@ function recordEventAndRefresh(player, teamKey, actionTypeStr, actionDescription
     
     const qtrLabel = state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : `${state.timer.quarter}Q`;
     updateRecentPlay(`[${qtrLabel}] ${els.timerDisplay.textContent} - ${actionDescription}`);
+
+    // タイマーが停止中で、かつ残り時間が0ではない場合は自動スタートする
+    if (!state.timer.isRunning && (state.timer.minutes > 0 || state.timer.seconds > 0)) {
+        toggleTimer();
+    }
 
     // Clean up
     state.selectedPlayerId = null; 
@@ -813,6 +1034,7 @@ function undoEventByDelta(event) {
             break;
         case 'foul': // Note: actionType was 'pf' in the diff, but 'foul' in handleAction
             if (player) { player.stats.PF -= 1; }
+            team.quarterFouls = Math.max(0, team.quarterFouls - 1);
             break;
         case 'timeout':
             team.timeouts = event.previousState.timeouts; // Restore previous timeout count
@@ -880,42 +1102,15 @@ function exportCsv() {
 // --- ATTACH LISTENERS ---
 function setupEventListeners() {
     els.timerDisplay.addEventListener('click', toggleTimer);
-    els.btnTimerMinus.addEventListener('click', () => adjustTimer(-1));
-    els.btnTimerPlus.addEventListener('click', () => adjustTimer(1));
+    els.btnTimerMinusMin.addEventListener('click', () => adjustTimer(-60));
+    els.btnTimerMinus10Sec.addEventListener('click', () => adjustTimer(-10));
+    els.btnTimerMinusSec.addEventListener('click', () => adjustTimer(-1));
+    els.btnTimerPlusSec.addEventListener('click', () => adjustTimer(1));
+    els.btnTimerPlus10Sec.addEventListener('click', () => adjustTimer(10));
+    els.btnTimerPlusMin.addEventListener('click', () => adjustTimer(60));
     
     // Quarter selector (Advance Quarter / OT)
-    els.currentQuarter.parentElement.addEventListener('click', () => {
-        if (confirm("次のクォーター（または延長戦）に進みますか？\nタイマーとタイムアウト(各1回)がセットされます。")) {
-            if (state.timer.quarter < 4 && state.timer.otPeriod === 0) {
-                state.timer.quarter++;
-            } else {
-                // If we are at 4Q or already in OT, start/increment OT
-                state.timer.quarter = 4; // pin to 4 logically
-                state.timer.otPeriod++;
-            }
-            
-            // Log Quarter Start
-            const qtrName = state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : `${state.timer.quarter}Q`;
-            state.playLog.push({
-                timestamp: new Date().toISOString(),
-                quarter: state.timer.otPeriod > 0 ? `OT${state.timer.otPeriod}` : state.timer.quarter,
-                time: "00:00",
-                teamKey: 'TEAM',
-                playerId: 'TEAM',
-                playerNumber: '-',
-                playerName: '-',
-                actionType: 'quarter_start',
-                description: `${qtrName} 開始`,
-                previousState: { teamScore: 0, timeouts: 0, isOnCourt: false }
-            });
-            
-            resetTimeForQuarter();
-            updateTimerDisplay();
-            updateScoreBoard();
-            renderPlayLog();
-            saveGameState();
-        }
-    });
+    els.currentQuarter.parentElement.addEventListener('click', openQuarterModal);
 
     els.btnTimeoutA.addEventListener('click', () => handleTimeout('A'));
     els.btnTimeoutB.addEventListener('click', () => handleTimeout('B'));

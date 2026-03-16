@@ -24,9 +24,21 @@
                 <span class="icon-updown">↕</span>
             </div>
             <div class="timer-area">
-                <button class="btn-timer-adjust" id="btn-timer-minus">⊖</button>
+                <div style="display: flex; gap: 5px; flex-direction: column; align-items: center;">
+                    <button class="btn-timer-adjust" id="btn-timer-plus-min" style="font-size: 14px; padding: 2px;">+1分</button>
+                    <button class="btn-timer-adjust" id="btn-timer-minus-min" style="font-size: 14px; padding: 2px;">-1分</button>
+                </div>
                 <div class="timer-display" id="timer-display">10:00</div>
-                <button class="btn-timer-adjust" id="btn-timer-plus">⊕</button>
+                <div style="display: flex; gap: 5px; flex-direction: column; align-items: center;">
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-timer-adjust" id="btn-timer-plus-10sec" style="font-size: 14px; padding: 2px;">+10秒</button>
+                        <button class="btn-timer-adjust" id="btn-timer-plus-sec" style="font-size: 14px; padding: 2px;">+1秒</button>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-timer-adjust" id="btn-timer-minus-10sec" style="font-size: 14px; padding: 2px;">-10秒</button>
+                        <button class="btn-timer-adjust" id="btn-timer-minus-sec" style="font-size: 14px; padding: 2px;">-1秒</button>
+                    </div>
+                </div>
             </div>
             <div class="score-display">
                 <span id="score-a" class="score">0</span>
@@ -52,6 +64,7 @@
         <!-- チームA（左側） -->
         <section class="team-panel team-a" id="panel-team-a">
             <h2 contenteditable="true" class="team-name" id="team-name-a">チームA</h2>
+            <div id="team-foul-a" class="team-foul" style="text-align: center; font-size: 12px; margin-bottom: 5px;">チームファウル: 0/5回</div>
             <div class="player-grid" id="player-grid-a">
                 <!-- JavaScriptで生成 -->
             </div>
@@ -84,6 +97,7 @@
         <!-- チームB（右側） -->
         <section class="team-panel team-b" id="panel-team-b">
             <h2 contenteditable="true" class="team-name" id="team-name-b">チームB</h2>
+            <div id="team-foul-b" class="team-foul" style="text-align: center; font-size: 12px; margin-bottom: 5px;">チームファウル: 0/5回</div>
             <div class="player-grid" id="player-grid-b">
                 <!-- JavaScriptで生成 -->
             </div>
@@ -135,6 +149,35 @@
             <div class="modal-actions">
                 <button class="btn btn-outline" onclick="closeSubModal()">キャンセル</button>
                 <button class="btn btn-primary" id="btn-confirm-sub">交代を確定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- クォーター更新時 メンバー確認・変更モーダル -->
+    <div id="quarter-sub-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 600px;">
+            <h3 id="quarter-modal-title">次のクォーターの出場メンバーを選択 (各5名)</h3>
+            
+            <div class="sub-columns">
+                <!-- チームAの選手 -->
+                <div class="sub-column">
+                    <h4 id="quarter-modal-team-a-name">チームA</h4>
+                    <div id="quarter-list-a" class="sub-list">
+                        <!-- JS generated -->
+                    </div>
+                </div>
+                <!-- チームBの選手 -->
+                <div class="sub-column">
+                    <h4 id="quarter-modal-team-b-name">チームB</h4>
+                    <div id="quarter-list-b" class="sub-list">
+                        <!-- JS generated -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="closeQuarterModal()">キャンセル</button>
+                <button class="btn btn-primary" id="btn-confirm-quarter">クォーターを開始する</button>
             </div>
         </div>
     </div>
