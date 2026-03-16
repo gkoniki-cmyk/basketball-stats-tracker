@@ -250,6 +250,18 @@ button:active {
     font-weight: bold;
     margin-top: 2px;
 }
+/* Foul Alerts */
+.foul-warning {
+    background-color: #fffde7 !important;
+    border-color: #fbc02d !important;
+    color: #f57f17 !important;
+}
+.foul-danger {
+    background-color: #ffebee !important;
+    border-color: #d32f2f !important;
+    color: #c62828 !important;
+}
+
 .btn-member-change {
     margin-top: auto;
     font-size: 12px;
